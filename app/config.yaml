@@ -1,0 +1,9 @@
+# Example config.yaml
+models:
+  - name: SDXL
+    path: app/models/sdxl.py
+    resources: [gpu]
+  - name: Flux
+    path: app/models/flux.py
+    resources: [gpu, cpu]
+image_generation_timeout: 60
