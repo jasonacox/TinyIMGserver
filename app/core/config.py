@@ -9,7 +9,7 @@ other server parameters.
 
 import yaml
 
-def load_config(path="/Users/jason/Code/TinyIMGserver/app/config.yaml"):
+def load_config(path="app/config.yaml"):
     """
     Load configuration from YAML file.
     

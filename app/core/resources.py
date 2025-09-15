@@ -32,14 +32,22 @@ def scan_gpus():
     system = platform.system()
     # Try NVIDIA GPUs first
     try:
-        result = subprocess.run([
-            "nvidia-smi", "--query-gpu=index,memory.total,name", "--format=csv,noheader"
+        # Query both free and total memory for each GPU
+        result_free = subprocess.run([
+            "nvidia-smi", "--query-gpu=index,memory.free,name", "--format=csv,noheader"
         ], capture_output=True, text=True, check=True)
-        for line in result.stdout.strip().split("\n"):
-            idx, mem, name = [x.strip() for x in line.split(",")]
+        result_total = subprocess.run([
+            "nvidia-smi", "--query-gpu=index,memory.total", "--format=csv,noheader"
+        ], capture_output=True, text=True, check=True)
+        free_lines = result_free.stdout.strip().split("\n")
+        total_lines = result_total.stdout.strip().split("\n")
+        for free_line, total_line in zip(free_lines, total_lines):
+            idx, mem_free, name = [x.strip() for x in free_line.split(",")]
+            mem_total = total_line.strip()
             gpus.append({
                 "id": int(idx),
-                "memory": mem,
+                "memory": mem_free,
+                "total_memory": mem_total,
                 "name": name,
                 "type": "NVIDIA"
             })

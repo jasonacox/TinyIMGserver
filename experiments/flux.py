@@ -34,26 +34,72 @@ pipe = FluxPipeline.from_pretrained(
     "black-forest-labs/FLUX.1-schnell",
     torch_dtype=dtype
 )
-# If you still OOM without this, move it above .to(device) to load straight to CPU first.
-pipe.enable_model_cpu_offload()        # big win for OOM (trades speed for RAM)
-pipe.enable_attention_slicing()        # chunk attention to save memory
-pipe.enable_vae_slicing()              # decode in slices (helps big images)
-# pipe.enable_sequential_cpu_offload() # heavier offload; try if you're *still* OOM
+# Prefer offload over full .to(cuda) to avoid VRAM spike
+pipe.enable_model_cpu_offload()
+try:
+    pipe.enable_attention_slicing()
+except Exception:
+    pass
+try:
+    if hasattr(pipe, "enable_vae_tiling"):
+        pipe.enable_vae_tiling()
+    if hasattr(pipe, "enable_vae_slicing"):
+        pipe.enable_vae_slicing()
+except Exception:
+    pass
+try:
+    import xformers  # noqa: F401
+    if hasattr(pipe, "enable_xformers_memory_efficient_attention"):
+        pipe.enable_xformers_memory_efficient_attention()
+except Exception:
+    pass
 
 prompt = "A basket of kittens"
 
 # 5) Conservative settings (adjust upward after it works)
 height, width = 768, 768        # start smaller; try 896 or 1024 later
-steps = 6                       # schnell looks ok at 4–10
+steps = 4                       # schnell looks ok at 4–10
+guidance_scale = 1.0            # recommended for FLUX schnell
+
 generator = torch.Generator(device=device).manual_seed(42)
 
-image = pipe(
-    prompt,
-    guidance_scale=0.0,         # recommended for FLUX schnell
-    num_inference_steps=steps,
-    height=height, width=width,
-    generator=generator,
-).images[0]
+def attempt(h, w, s, seq=False):
+    if seq and hasattr(pipe, "enable_sequential_cpu_offload"):
+        try:
+            pipe.enable_sequential_cpu_offload()
+        except Exception:
+            pass
+    return pipe(
+        prompt,
+    guidance_scale=guidance_scale,
+        num_inference_steps=s,
+        height=h, width=w,
+        generator=generator,
+    ).images[0]
+
+cur_h, cur_w, cur_s = height, width, steps
+attempted_seq = False
+while True:
+    try:
+        image = attempt(cur_h, cur_w, cur_s, seq=attempted_seq)
+        break
+    except RuntimeError as re:
+        msg = str(re)
+        if ("CUDA out of memory" in msg) or ("CUDNN_STATUS_ALLOC_FAILED" in msg):
+            print(f"OOM at {cur_w}x{cur_h}, steps={cur_s}. Retrying with safer settings...")
+            torch.cuda.empty_cache()
+            gc.collect()
+            if not attempted_seq:
+                attempted_seq = True
+                continue
+            if max(cur_h, cur_w) > 512:
+                cur_h = max(384, cur_h - 128)
+                cur_w = max(384, cur_w - 128)
+                continue
+            if cur_s > 4:
+                cur_s = 4
+                continue
+        raise
 
 image.save("basket-of-kittens.png")
 print("Saved basket-of-kittens.png on", device)

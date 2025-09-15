@@ -7,6 +7,7 @@ GPU resource management, and error handling.
 """
 
 from fastapi import APIRouter, HTTPException
+import logging
 from pydantic import BaseModel, field_validator
 from typing import Optional
 from app.core.resources import acquire_gpu, release_gpu
@@ -14,6 +15,7 @@ from app.core.config import CONFIG
 from app.core.stats import server_stats
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 class GenerateRequest(BaseModel):
     """
@@ -126,23 +128,24 @@ async def generate_image(request: GenerateRequest):
 
     try:
         server_stats.set_active_generations(1)  # Simplified for single generation
-        
+
         model_name = request.model.lower()
         image_data = None
-        
+
         if model_name == "flux":
             try:
-                # Try Apple Silicon optimized version first
-                from app.models.flux_apple import generate_flux_image
+                from app.models.flux import generate_flux_image
                 image_data, actual_seed = generate_flux_image(
                     prompt=request.prompt,
                     height=height,
                     width=width,
                     steps=request.steps,
-                    seed=request.seed
+                    seed=request.seed,
+                    guidance_scale=request.guidance_scale,
+                    gpu_id=gpu_id,
                 )
             except Exception as e:
-                # Fallback to mock image
+                logger.error(f"Error generating image with FLUX model: {e}")
                 from app.models.mock import generate_mock_image
                 image_data, actual_seed = generate_mock_image(
                     prompt=f"[MOCK FLUX] {request.prompt}",
@@ -151,11 +154,9 @@ async def generate_image(request: GenerateRequest):
                     steps=request.steps,
                     seed=request.seed
                 )
-                
         elif model_name == "sdxl":
             try:
-                # Try Apple Silicon optimized version first
-                from app.models.sdxl_apple import generate_sdxl_image
+                from app.models.sdxl import generate_sdxl_image
                 image_data, actual_seed = generate_sdxl_image(
                     prompt=request.prompt,
                     height=height,
@@ -164,7 +165,6 @@ async def generate_image(request: GenerateRequest):
                     seed=request.seed
                 )
             except Exception as e:
-                # Fallback to mock image
                 from app.models.mock import generate_mock_image
                 image_data, actual_seed = generate_mock_image(
                     prompt=f"[MOCK SDXL] {request.prompt}",
