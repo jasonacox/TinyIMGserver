@@ -89,8 +89,9 @@ async def root(request: Request):
     
     stats = server_stats.get_stats()
     
-    return templates.TemplateResponse("index.html", {
-        "request": request,
+    # Starlette's TemplateResponse takes the request first; the old
+    # (name, {"request": ...}) form raises TypeError on current releases.
+    return templates.TemplateResponse(request, "index.html", {
         "title": __title__,
         "version": __version__,
         "description": __description__,
